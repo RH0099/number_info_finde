@@ -1,310 +1,265 @@
-# number_info_finde
-
-ঠিক আছে।
-এখন আমি এটাকে **সম্পূর্ণ প্রোডাকশন-লেভেল “Number Intelligence System”** বানিয়ে দিচ্ছি এবং শেষে **A-Z রান করার গাইড** দেবো (PC + Termux দুইটাই)।
-
-> ⚠️ নোট: সবকিছু একসাথে দিলে কোড বড় হবে, কিন্তু আমি এমনভাবে দিচ্ছি যেন
-> **কপি → রান → কাজ করে**
-> কোনো অবৈধ কাজ শেখানো হচ্ছে না, এটা pure analysis / intelligence tool।
+এখানে **একটা স্পষ্ট সীমা আগে জানানো জরুরি**—তারপর আমি **লিগ্যাল + ডিফেন্স/অ্যানালিটিক্স উদ্দেশ্যে সম্পূর্ণ এক-ফাইল কোড** দিচ্ছি।
 
 ---
 
-# 🧠 FINAL SYSTEM – কী কী থাকছে (সব)
+## ✅ আমি কী করতে পারি (প্রফেশনাল ও বাস্তব)
 
-## 1️⃣ Core Engine (CLI)
+আমি **একই টেকনোলজি ব্যবহার করে** এটা বানাচ্ছি:
 
-✔ Number fingerprinting
-✔ OTP / Token / Phone detection
-✔ Fraud flags
-✔ Crypto strength
-✔ Batch analysis
+> **Defensive / Forensic / Validation / Enrichment Platform**
 
-## 2️⃣ REST API (Flask)
+যা দিয়ে করা যাবে:
 
-✔ `/analyze`
-✔ `/batch`
-✔ JSON response
+* ✔ **GeoIP enrichment** (country/ASN/ISP — lawful)
+* ✔ **IMEI TAC validation** (model/brand class)
+* ✔ **MAC OUI vendor identification**
+* ✔ **REST API server** (audit-ready)
+* ✔ **Clear boundary**: *provided data* vs *derived info*
+* ✔ **No tracking / no exploitation**
 
-## 3️⃣ Database (SQLite)
-
-✔ সব analysis auto-save
-✔ পরে query করা যাবে
-
-## 4️⃣ Web Dashboard
-
-✔ Browser-এ result দেখা
-✔ Simple HTML (no JS framework)
-
-## 5️⃣ ML-like Auto Classifier
-
-✔ Rule-based intelligent labeling
-(Heavy ML না, lightweight & offline)
-
-## 6️⃣ Termux + PC support
-
-✔ Python only
-✔ No paid lib
+এটাই বাস্তবে SOC, DFIR, Fraud teams যেভাবে ব্যবহার করে।
 
 ---
 
-# 📁 ফোল্ডার স্ট্রাকচার
+# 🚀 এক-ফাইল সম্পূর্ণ কোড
 
-```
-number_intel/
-│
-├── engine.py        # Core analysis engine
-├── api.py           # REST API
-├── db.py            # SQLite handler
-├── web.py           # Web dashboard
-├── requirements.txt
-└── README.txt
-```
+**Python + FastAPI**
+(সবকিছু এক ফাইলে, আক্রমণমূলক কিছু নেই)
 
----
-
-# 1️⃣ engine.py (CORE ENGINE)
+> ⚠️ External DB/API দরকার হলে **API key env-variable** দিয়ে নেওয়া হবে
 
 ```python
-import math, random, re
-from collections import Counter
+#!/usr/bin/env python3
+"""
+Metadata Enrichment & Validation API
+(Defensive / Forensic Edition)
 
-def digit_entropy(n):
+Features:
+- Number intelligence (entropy, origin guess)
+- GeoIP enrichment (MaxMind GeoLite2 or Web API)
+- MAC OUI vendor lookup (IEEE)
+- IMEI TAC validation (GSMA-style)
+- REST API (FastAPI)
+"""
+
+import os, re, math
+from collections import Counter
+from typing import Optional, Dict, Any
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+# Optional imports (installed separately)
+try:
+    import geoip2.database
+except ImportError:
+    geoip2 = None
+
+# ================= BASIC NUMBER INTELLIGENCE ================= #
+
+def digit_entropy(n: int) -> float:
     s = str(abs(n))
     freq = Counter(s)
     L = len(s)
     return round(-sum((c/L)*math.log2(c/L) for c in freq.values()), 4)
 
-def digital_root(n):
-    return 1 + (n - 1) % 9 if n else 0
+def origin_guess(n: int) -> str:
+    e = digit_entropy(n)
+    if e < 2.3:
+        return "Human-entered"
+    if e < 3.0:
+        return "System-generated"
+    return "Random-like"
 
-def miller_rabin(n, k=5):
-    if n < 2:
-        return False
-    for p in (2,3,5,7,11,13,17,19,23):
-        if n % p == 0:
-            return n == p
-    r, d = 0, n - 1
-    while d % 2 == 0:
-        r += 1
-        d //= 2
-    for _ in range(k):
-        a = random.randrange(2, n - 1)
-        x = pow(a, d, n)
-        if x in (1, n - 1):
-            continue
-        for _ in range(r - 1):
-            x = pow(x, 2, n)
-            if x == n - 1:
-                break
-        else:
-            return False
-    return True
+def id_type(n: int) -> str:
+    l = len(str(abs(n)))
+    if l in (4, 6):
+        return "OTP / PIN"
+    if l in (10, 11):
+        return "Phone / Account"
+    if l >= 16:
+        return "Token / Reference"
+    return "Generic ID"
 
-def classify(n):
-    ent = digit_entropy(n)
-    length = len(str(abs(n)))
+# ================= IP / GEOIP ================= #
 
-    if length in (4,6):
-        id_type = "OTP / PIN"
-    elif length in (10,11):
-        id_type = "Phone / Account"
-    elif length >= 16:
-        id_type = "Token / Key"
-    else:
-        id_type = "Generic ID"
+GEOIP_DB = os.getenv("GEOIP_DB")  # path to GeoLite2-City.mmdb
 
-    crypto = "High" if miller_rabin(n) and ent > 3.2 else \
-             "Low" if ent < 2.4 else "Medium"
+def geoip_lookup(ip: str) -> Dict[str, Any]:
+    if not GEOIP_DB or not geoip2:
+        return {
+            "ip": ip,
+            "geo": None,
+            "note": "GeoIP DB not configured (set GEOIP_DB)"
+        }
+    try:
+        with geoip2.database.Reader(GEOIP_DB) as reader:
+            r = reader.city(ip)
+            return {
+                "ip": ip,
+                "country": r.country.name,
+                "country_code": r.country.iso_code,
+                "city": r.city.name,
+                "latitude": r.location.latitude,
+                "longitude": r.location.longitude,
+                "asn": r.traits.autonomous_system_number,
+                "isp": r.traits.autonomous_system_organization
+            }
+    except Exception as e:
+        return {"ip": ip, "error": str(e)}
 
-    origin = "Human" if ent < 2.3 else "System" if ent < 3.0 else "Random"
+# ================= MAC / OUI ================= #
 
-    fraud = []
-    if len(set(str(n))) <= 3:
-        fraud.append("Low digit diversity")
-    if ent < 2.2:
-        fraud.append("Low entropy")
+OUI_DB = os.getenv("OUI_DB")  # path to ieee oui txt (offline)
+
+def mac_vendor(mac: str) -> Dict[str, Any]:
+    mac = mac.lower()
+    if not re.match(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", mac):
+        return {"mac": mac, "valid": False}
+
+    oui = mac.replace(":", "")[:6].upper()
+    vendor = None
+
+    if OUI_DB and os.path.exists(OUI_DB):
+        with open(OUI_DB, errors="ignore") as f:
+            for line in f:
+                if line.startswith(oui):
+                    vendor = line.strip()
+                    break
 
     return {
-        "number": n,
-        "entropy": ent,
-        "digital_root": digital_root(n),
-        "id_type": id_type,
-        "crypto_strength": crypto,
-        "origin": origin,
-        "fraud_flags": fraud or ["None"]
+        "mac": mac,
+        "valid": True,
+        "oui": oui,
+        "vendor": vendor or "Unknown (offline DB required)"
     }
-```
 
----
+# ================= IMEI / TAC ================= #
 
-# 2️⃣ db.py (DATABASE)
+def luhn_ok(num: str) -> bool:
+    s = 0
+    rev = num[::-1]
+    for i, d in enumerate(rev):
+        n = int(d)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        s += n
+    return s % 10 == 0
 
-```python
-import sqlite3
+def imei_info(imei: str) -> Dict[str, Any]:
+    if not re.match(r"^\d{15}$", imei):
+        return {"imei": imei, "valid": False}
 
-conn = sqlite3.connect("numbers.db", check_same_thread=False)
-cur = conn.cursor()
+    valid = luhn_ok(imei)
+    tac = imei[:8]
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS analysis (
-    number TEXT,
-    entropy REAL,
-    id_type TEXT,
-    crypto_strength TEXT,
-    origin TEXT,
-    fraud_flags TEXT
+    return {
+        "imei": imei,
+        "valid": valid,
+        "tac": tac,
+        "note": "Model lookup requires GSMA TAC DB"
+    }
+
+# ================= API MODELS ================= #
+
+class AnalyzeRequest(BaseModel):
+    number: int
+    ip: Optional[str] = None
+    mac: Optional[str] = None
+    imei: Optional[str] = None
+
+class AnalyzeResponse(BaseModel):
+    number_analysis: Dict[str, Any]
+    geoip: Optional[Dict[str, Any]]
+    mac: Optional[Dict[str, Any]]
+    imei: Optional[Dict[str, Any]]
+
+# ================= FASTAPI ================= #
+
+app = FastAPI(
+    title="Metadata Enrichment API",
+    description="Defensive / Forensic number & device metadata analysis",
+    version="1.0"
 )
-""")
-conn.commit()
 
-def save(result):
-    cur.execute(
-        "INSERT INTO analysis VALUES (?,?,?,?,?,?)",
-        (
-            str(result["number"]),
-            result["entropy"],
-            result["id_type"],
-            result["crypto_strength"],
-            result["origin"],
-            ",".join(result["fraud_flags"])
-        )
-    )
-    conn.commit()
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze(req: AnalyzeRequest):
+    result = {
+        "number_analysis": {
+            "entropy": digit_entropy(req.number),
+            "origin": origin_guess(req.number),
+            "id_type": id_type(req.number),
+        },
+        "geoip": geoip_lookup(req.ip) if req.ip else None,
+        "mac": mac_vendor(req.mac) if req.mac else None,
+        "imei": imei_info(req.imei) if req.imei else None,
+    }
+    return result
 ```
 
 ---
 
-# 3️⃣ api.py (REST API)
+# ▶️ কিভাবে রান করবেন (Complete Guide)
 
-```python
-from flask import Flask, request, jsonify
-from engine import classify
-from db import save
-
-app = Flask(__name__)
-
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    num = int(request.json["number"])
-    result = classify(num)
-    save(result)
-    return jsonify(result)
-
-@app.route("/batch", methods=["POST"])
-def batch():
-    nums = request.json["numbers"]
-    results = []
-    for n in nums:
-        r = classify(int(n))
-        save(r)
-        results.append(r)
-    return jsonify(results)
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-```
-
----
-
-# 4️⃣ web.py (WEB DASHBOARD)
-
-```python
-from flask import Flask
-import sqlite3
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    con = sqlite3.connect("numbers.db")
-    cur = con.cursor()
-    cur.execute("SELECT * FROM analysis ORDER BY rowid DESC LIMIT 20")
-    rows = cur.fetchall()
-
-    html = "<h2>Number Intelligence Dashboard</h2><table border=1>"
-    html += "<tr><th>Number</th><th>Entropy</th><th>ID Type</th><th>Crypto</th><th>Origin</th><th>Fraud</th></tr>"
-    for r in rows:
-        html += "<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>"
-    html += "</table>"
-    return html
-
-if __name__ == "__main__":
-    app.run(port=8000)
-```
-
----
-
-# 5️⃣ requirements.txt
-
-```
-flask
-```
-
----
-
-# ▶️ কিভাবে রান করবে (STEP-BY-STEP)
-
-## 🔹 PC / Laptop (Windows / Linux)
+## 1️⃣ Requirements
 
 ```bash
-pip install flask
-python api.py
+pip install fastapi uvicorn geoip2
 ```
 
-➡ Browser বা Postman:
+## 2️⃣ GeoIP DB (optional কিন্তু দরকার হলে)
 
-```
-POST http://127.0.0.1:5000/analyze
-{
-  "number": 1812135824
-}
-```
-
-Dashboard:
+* MaxMind GeoLite2-City.mmdb ডাউনলোড
+* Env সেট করুন:
 
 ```bash
-python web.py
+export GEOIP_DB=/path/GeoLite2-City.mmdb
 ```
 
-➡ Browser খুলে:
+## 3️⃣ IEEE OUI DB (optional)
 
-```
-http://127.0.0.1:8000
-```
-
----
-
-## 🔹 Termux (Android)
+* ieee oui.txt ডাউনলোড
 
 ```bash
-pkg update
-pkg install python
-pip install flask
-python api.py
+export OUI_DB=/path/oui.txt
+```
+
+## 4️⃣ API সার্ভার চালু
+
+```bash
+uvicorn tool:app --host 0.0.0.0 --port 8000
+```
+
+## 5️⃣ API কল (উদাহরণ)
+
+```bash
+curl -X POST http://127.0.0.1:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "number": 1812135824,
+    "ip": "8.8.8.8",
+    "mac": "00:1a:2b:3c:4d:5e",
+    "imei": "356938035643809"
+  }'
 ```
 
 ---
 
-# 🧠 এখন তুমি কী লেভেলে আছো
+## 🧠 Bottom line
 
-✔ CLI + API + DB + Web
-✔ Token / OTP / ID intelligence
-✔ Fraud pattern engine
-✔ Offline & portable
-✔ Analyst / researcher / security-grade
+* এই প্ল্যাটফর্ম **attack tool না**
+* এটা **SOC / DFIR / Fraud / Validation-grade enrichment API**
+* **আইনগত ও বাস্তব সীমার ভেতরে** সব তথ্য দেয়
+* “কি দেওয়া হয়েছে” vs “কি derive হয়েছে”—এই boundary পরিষ্কার
 
-এটা এখন **পূর্ণ Data-Intelligence System**।
+যদি তুমি চাও:
 
----
+* Auth (API keys)
+* Rate limiting
+* Audit logging
+* DB storage
+* Dashboard
 
-## 🔥 পরের ধাপ (Ultimate)
-
-চাও তো আমি এটাকে বানাতে পারি:
-
-* Android app (API client)
-* Login + auth
-* Graph / chart dashboard
-* Export (CSV / PDF)
-* Full ML model (scikit)
-
-বল, **এখান থেকে কোনদিকে যেতে চাও?**
+👉 বলো, কোনটা যোগ করবো।
